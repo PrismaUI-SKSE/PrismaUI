@@ -80,14 +80,6 @@ namespace PrismaUI::ViewManager {
             return;
         }
 
-        if (viewData->isPaused.load()) {
-            auto ui = RE::UI::GetSingleton();
-            if (ui && ui->numPausesGame > 0) {
-                ui->numPausesGame--;
-            }
-            viewData->isPaused.store(false);
-        }
-
         PrismaUI::InputHandler::DisableInputCapture(viewId);
         if (closeFocusMenu) {
             PrismaUI::InputHandler::ClearImeState(viewId);
@@ -98,19 +90,30 @@ namespace PrismaUI::ViewManager {
             FocusMenu::Close();
         }
 
-        // Only re-enable controls if we disabled them (flatscreen only)
-        if (!PrismaVR::IsVRActive()) {
-            auto controlMap = RE::ControlMap::GetSingleton();
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kWheelZoom, true, false);
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kLooking, true, false);
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kJumping, true, false);
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kMovement, true, false);
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kActivate, true, false);
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kPOVSwitch, true, false);
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kVATS, true, false);
-            // Added for gamepads:
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kFighting, true, false);
-        }
+        // ControlMap and UI are not thread-safe: change them on the game's UI thread, not on ultralightThread.
+        SKSE::GetTaskInterface()->AddUITask([viewData]() {
+            if (viewData->isPaused.load()) {
+                auto ui = RE::UI::GetSingleton();
+                if (ui && ui->numPausesGame > 0) {
+                    ui->numPausesGame--;
+                }
+                viewData->isPaused.store(false);
+            }
+
+            // Only re-enable controls if we disabled them (flatscreen only)
+            if (!PrismaVR::IsVRActive()) {
+                auto controlMap = RE::ControlMap::GetSingleton();
+                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kWheelZoom, true, false);
+                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kLooking, true, false);
+                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kJumping, true, false);
+                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kMovement, true, false);
+                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kActivate, true, false);
+                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kPOVSwitch, true, false);
+                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kVATS, true, false);
+                // Added for gamepads:
+                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kFighting, true, false);
+            }
+        });
     }
 
     void Show(const Core::PrismaViewId& viewId) {
@@ -264,25 +267,28 @@ namespace PrismaUI::ViewManager {
 
             // In VR, the menu is a floating 3D panel — player keeps full control
             if (!PrismaVR::IsVRActive()) {
-                auto controlMap = RE::ControlMap::GetSingleton();
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kWheelZoom, false, false);
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kLooking, false, false);
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kJumping, false, false);
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kMovement, false, false);
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kActivate, false, false);
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kPOVSwitch, false, false);
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kVATS, false, false);
-                // Added for gamepads:
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kFighting, false, false);
-            }
+                // ControlMap and UI are not thread-safe: change them on the game's UI thread, not on ultralightThread.
+                SKSE::GetTaskInterface()->AddUITask([viewId, viewData, pauseGame]() {
+                    auto controlMap = RE::ControlMap::GetSingleton();
+                    controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kWheelZoom, false, false);
+                    controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kLooking, false, false);
+                    controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kJumping, false, false);
+                    controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kMovement, false, false);
+                    controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kActivate, false, false);
+                    controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kPOVSwitch, false, false);
+                    controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kVATS, false, false);
+                    // Added for gamepads:
+                    controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kFighting, false, false);
 
-            if (pauseGame && !PrismaVR::IsVRActive()) {
-                auto ui = RE::UI::GetSingleton();
-                if (ui) {
-                    ui->numPausesGame++;
-                    viewData->isPaused.store(true);
-                    logger::debug("Game paused for View [{}]", viewId);
-                }
+                    if (pauseGame) {
+                        auto ui = RE::UI::GetSingleton();
+                        if (ui) {
+                            ui->numPausesGame++;
+                            viewData->isPaused.store(true);
+                            logger::debug("Game paused for View [{}]", viewId);
+                        }
+                    }
+                });
             }
 
             logger::debug("Focus: View [{}] focused successfully.", viewId);
@@ -316,13 +322,15 @@ namespace PrismaUI::ViewManager {
 
             if (!viewData->ultralightView) {
                 logger::warn("Unfocus: View [{}] Ultralight View is not ready.", viewId);
-                if (viewData->isPaused.load()) {
-                    auto ui = RE::UI::GetSingleton();
-                    if (ui && ui->numPausesGame > 0) {
-                        ui->numPausesGame--;
+                SKSE::GetTaskInterface()->AddUITask([viewData]() {
+                    if (viewData->isPaused.load()) {
+                        auto ui = RE::UI::GetSingleton();
+                        if (ui && ui->numPausesGame > 0) {
+                            ui->numPausesGame--;
+                        }
+                        viewData->isPaused.store(false);
                     }
-                    viewData->isPaused.store(false);
-                }
+                });
                 PrismaUI::InputHandler::DisableInputCapture(viewId);
                 if (!PrismaVR::IsVRActive()) FocusMenu::Close();
                 return;
