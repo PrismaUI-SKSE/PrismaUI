@@ -12,7 +12,7 @@ static void SKSEMessageHandler(SKSE::MessagingInterface::Message *message) {
   }
 }
 
-extern "C" DLLEXPORT bool SKSEAPI
+extern "C" DLLEXPORT bool
 SKSEPlugin_Load(const SKSE::LoadInterface *a_skse) {
 
   SKSE::Init(a_skse, false); // false = don't initialize logger by default
@@ -46,7 +46,7 @@ SKSEPlugin_Load(const SKSE::LoadInterface *a_skse) {
   return true;
 }
 
-extern "C" DLLEXPORT void *SKSEAPI
+extern "C" DLLEXPORT void *
 RequestPluginAPI(const PRISMA_UI_API::InterfaceVersion a_interfaceVersion) {
   auto api = PluginAPI::PrismaUIInterface::GetSingleton();
 
